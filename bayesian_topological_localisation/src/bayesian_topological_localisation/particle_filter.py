@@ -283,15 +283,15 @@ class TopologicalParticleFilter():
 
     def _add_noise(self, particle):
         # noise to the node, bernoulli
-        if np.random.random() < 0.01:
-            if self.only_connected:
-                closeby_nodes = self.connected_nodes[particle.node]
-            else:
-                closeby_nodes = np.where((self.node_distances[particle.node]<=3))[0]
-            particle.node = np.random.choice(closeby_nodes)
-        
-        particle.vel += np.random.normal(0.0, 0.005)
-        particle.life += np.random.exponential(scale=0.5)
+        # if np.random.random() < 0.01:  ##VICKY BS
+        #     if self.only_connected:
+        #         closeby_nodes = self.connected_nodes[particle.node]
+        #     else:
+        #         closeby_nodes = np.where((self.node_distances[particle.node]<=3))[0]
+        #     particle.node = np.random.choice(closeby_nodes)
+        pass
+        # particle.vel += np.random.normal(0.0, 0.005)  # VICKY BS
+        # particle.life += np.random.exponential(scale=0.5)  # VICKY BS
 
     def _resample(self, use_weight=True):
         if use_weight:
@@ -306,9 +306,7 @@ class TopologicalParticleFilter():
 
         # add noise to the state of the new particles
         for p in self.particles:
-            # if self.print_debug: print("clean", str(p))
             self._add_noise(p)
-            # if self.print_debug: print("noisy", str(p))
 
         # compute entropy of the new distribution
         nodes, indices_start, counts = np.unique(
