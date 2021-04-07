@@ -15,6 +15,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped
 from visualization_msgs.msg import Marker, MarkerArray
 from strands_navigation_msgs.msg import TopologicalMap
 from std_msgs.msg import String
+from tf.transformations import quaternion_from_euler
 
 class TopologicalLocalisation():
 
@@ -159,8 +160,8 @@ class TopologicalLocalisation():
             ptcmkrmsg.pose.position.z = 0
             ptcmkrmsg.pose.orientation.w = 1
             ptcmkrmsg.scale.x = 0.1
-            ptcmkrmsg.scale.y = 0.1
-            ptcmkrmsg.scale.z = 0.1
+            ptcmkrmsg.scale.y = 0.05
+            ptcmkrmsg.scale.z = 0.05
             ptcmkrmsg.color.a = 0.6
             ptcmkrmsg.color.r = 1
             ptcmkrmsg.color.g = 0
@@ -175,8 +176,8 @@ class TopologicalLocalisation():
             staptcmkrmsg.pose.position.z = 0
             staptcmkrmsg.pose.orientation.w = 1
             staptcmkrmsg.scale.x = 0.1
-            staptcmkrmsg.scale.y = 0.1
-            staptcmkrmsg.scale.z = 0.1
+            staptcmkrmsg.scale.y = 0.05
+            staptcmkrmsg.scale.z = 0.05
             staptcmkrmsg.color.a = 0.6
             staptcmkrmsg.color.r = 1
             staptcmkrmsg.color.g = 1
@@ -253,8 +254,12 @@ class TopologicalLocalisation():
                         ptcsarrmsg.markers[i].scale.x * np.random.randn(1, 1)
                     ptcsarrmsg.markers[i].pose.position.y = self.node_coords[p.node][1] + \
                         ptcsarrmsg.markers[i].scale.y * np.random.randn(1, 1)
-                    ptcsarrmsg.markers[i].pose.orientation.x = p.vel[0]
-                    ptcsarrmsg.markers[i].pose.orientation.y = p.vel[1]
+                    _quat_vel = quaternion_from_euler(
+                        0, 0, np.arctan2(p.vel[1], p.vel[0]))
+                    ptcsarrmsg.markers[i].pose.orientation.x = _quat_vel[0]
+                    ptcsarrmsg.markers[i].pose.orientation.y = _quat_vel[1]
+                    ptcsarrmsg.markers[i].pose.orientation.z = _quat_vel[2]
+                    ptcsarrmsg.markers[i].pose.orientation.w = _quat_vel[3]
                 nodemkrmsg.pose.position.x = self.node_coords[node][0]
                 nodemkrmsg.pose.position.y = self.node_coords[node][1]
 
@@ -271,8 +276,8 @@ class TopologicalLocalisation():
                         staptcsarrmsg.markers[i].scale.x * np.random.randn(1, 1)
                     staptcsarrmsg.markers[i].pose.position.y = self.node_coords[p.node][1] + \
                         staptcsarrmsg.markers[i].scale.y * np.random.randn(1, 1)
-                    staptcsarrmsg.markers[i].pose.orientation.x = p.vel[0]
-                    staptcsarrmsg.markers[i].pose.orientation.y = p.vel[1]
+                    # staptcsarrmsg.markers[i].pose.orientation.x = p.vel[0]
+                    # staptcsarrmsg.markers[i].pose.orientation.y = p.vel[1]
 
                 staparviz_pub.publish(staptcsarrmsg)
 
