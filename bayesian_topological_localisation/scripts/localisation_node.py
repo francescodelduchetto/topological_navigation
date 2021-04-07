@@ -155,7 +155,7 @@ class TopologicalLocalisation():
         for i in range(n_particles):
             ptcmkrmsg = Marker()
             ptcmkrmsg.header.frame_id = "/map"
-            ptcmkrmsg.type = ptcmkrmsg.SPHERE
+            ptcmkrmsg.type = ptcmkrmsg.ARROW
             ptcmkrmsg.pose.position.z = 0
             ptcmkrmsg.pose.orientation.w = 1
             ptcmkrmsg.scale.x = 0.1
@@ -171,7 +171,7 @@ class TopologicalLocalisation():
         for i in range(n_particles):
             staptcmkrmsg = Marker()
             staptcmkrmsg.header.frame_id = "/map"
-            staptcmkrmsg.type = staptcmkrmsg.SPHERE
+            staptcmkrmsg.type = staptcmkrmsg.ARROW
             staptcmkrmsg.pose.position.z = 0
             staptcmkrmsg.pose.orientation.w = 1
             staptcmkrmsg.scale.x = 0.1
@@ -253,6 +253,8 @@ class TopologicalLocalisation():
                         ptcsarrmsg.markers[i].scale.x * np.random.randn(1, 1)
                     ptcsarrmsg.markers[i].pose.position.y = self.node_coords[p.node][1] + \
                         ptcsarrmsg.markers[i].scale.y * np.random.randn(1, 1)
+                    ptcsarrmsg.markers[i].pose.orientation.x = p.vel[0]
+                    ptcsarrmsg.markers[i].pose.orientation.y = p.vel[1]
                 nodemkrmsg.pose.position.x = self.node_coords[node][0]
                 nodemkrmsg.pose.position.y = self.node_coords[node][1]
 
@@ -269,6 +271,8 @@ class TopologicalLocalisation():
                         staptcsarrmsg.markers[i].scale.x * np.random.randn(1, 1)
                     staptcsarrmsg.markers[i].pose.position.y = self.node_coords[p.node][1] + \
                         staptcsarrmsg.markers[i].scale.y * np.random.randn(1, 1)
+                    staptcsarrmsg.markers[i].pose.orientation.x = p.vel[0]
+                    staptcsarrmsg.markers[i].pose.orientation.y = p.vel[1]
 
                 staparviz_pub.publish(staptcsarrmsg)
 
