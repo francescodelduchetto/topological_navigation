@@ -11,10 +11,10 @@ class TopologicalParticleFilter():
 
     # if the entropy of the current distribution is smaller than this threshold,
     # stop jumping to close nodes that are unconnected
-    DEFAULT_UNCONNECTED_JUMP_THRESHOLD = 0.6
+    DEFAULT_UNCONNECTED_JUMP_THRESHOLD = 0.0
     # if the Jensen-Shannon Distance btw prior and likelihood is greater than this threshold, 
     # reinitialize particles with the likelihood AND restart jumping to close unconnected nodes
-    DEFAULT_REINIT_JSD_THRESHOLD = 0.975
+    DEFAULT_REINIT_JSD_THRESHOLD = 1.0
 
 
     def __init__(self, num, prediction_model, initial_spread_policy, prediction_speed_decay, node_coords, node_distances, connected_nodes, node_diffs2D, node_names,
