@@ -11,10 +11,10 @@ class TopologicalParticleFilter():
 
     # if the entropy of the current distribution is smaller than this threshold,
     # stop jumping to close nodes that are unconnected
-    DEFAULT_UNCONNECTED_JUMP_THRESHOLD = 0.8
+    DEFAULT_UNCONNECTED_JUMP_THRESHOLD = 0.6
     # if the Jensen-Shannon Distance btw prior and likelihood is greater than this threshold, 
     # reinitialize particles with the likelihood AND restart jumping to close unconnected nodes
-    DEFAULT_REINIT_JSD_THRESHOLD = 0.90
+    DEFAULT_REINIT_JSD_THRESHOLD = 0.975
 
 
     def __init__(self, num, prediction_model, initial_spread_policy, prediction_speed_decay, node_coords, node_distances, connected_nodes, node_diffs2D, node_names,
@@ -230,27 +230,27 @@ class TopologicalParticleFilter():
         for _, (node, indices) in enumerate(zip(nodes, indices_groups)):
             self.W[indices] = prob_dist[node]
 
-        # # weight speed
-        # if len(self.speed_samples) == self.n_speed_samples:
-        #     def __gaussian(x, mu, sig):
-        #         return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
+        # weight speed
+        if len(self.speed_samples) == self.n_speed_samples:
+            def __gaussian(x, mu, sig):
+                return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
             
-        #     norm_current_sped = max(0.01, np.linalg.norm(self.current_speed))
-        #     unit_current_speed = self.current_speed / \
-        #         norm_current_sped
-        #     for p_i, _vel in enumerate(_vels):
-        #         # weight angle
-        #         _norm_vel = max(0.01, np.linalg.norm(_vel))
-        #         _unit_vel = _vel / _norm_vel
-        #         dot_product = np.dot(unit_current_speed, _unit_vel)
-        #         angle = np.arccos(dot_product)
-        #         self.W[p_i] += (np.cos(angle) + 1) #/ 8.
-        #         # weght norm
-        #         _n_w = __gaussian(_norm_vel, norm_current_sped, norm_current_sped * 0.5)
-        #         self.W[p_i] += _n_w #/ 8.
-        #     # print("After")
+            norm_current_sped = max(0.01, np.linalg.norm(self.current_speed))
+            unit_current_speed = self.current_speed / \
+                norm_current_sped
+            for p_i, _vel in enumerate(_vels):
+                # weight angle
+                _norm_vel = max(0.01, np.linalg.norm(_vel))
+                _unit_vel = _vel / _norm_vel
+                dot_product = np.dot(unit_current_speed, _unit_vel)
+                angle = np.arccos(dot_product)
+                self.W[p_i] += (np.cos(angle) + 1) / 4.
+                # weght norm
+                _n_w = __gaussian(_norm_vel, norm_current_sped, norm_current_sped * 0.5)
+                self.W[p_i] += _n_w / 4.
+            # print("After")
 
-        # assign velocity of gps
+        # FOR TESTING assign velocity of gps
         # if len(self.speed_samples) == self.n_speed_samples:
         #     for i in range(len(self.predicted_particles)):
         #         self.predicted_particles[i].vel = self.current_speed
