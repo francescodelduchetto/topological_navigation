@@ -122,7 +122,7 @@ class TopologicalParticleFilter():
         nodes_prob = self._normalize(nodes_prob)
         _particles_nodes = np.random.choice(range(self.node_coords.shape[0]), self.n_of_ptcl, p=nodes_prob)
         # sample velocity (x,y components) as gaussian sample with mean 0.0 and a covariance
-        _particles_vels = np.random.normal(0.0, 0.05, (self.n_of_ptcl, 2))
+        _particles_vels = np.ones((self.n_of_ptcl, 2)) * 0.1# np.random.normal(0.0, 0.05, (self.n_of_ptcl, 2))
         # sample time (seconds) as exponential sample 
         _particles_lifes = np.random.exponential(scale=1.0, size=self.n_of_ptcl)
 
@@ -143,7 +143,7 @@ class TopologicalParticleFilter():
         probs = self._normalize(np.array(likelihood))
         _particles_nodes = np.random.choice(nodes, self.n_of_ptcl, p=probs)
         # sample velocity (x,y components) as gaussian sample with mean 0.0 and a covariance
-        _particles_vels = np.random.normal(0.0, 0.05, (self.n_of_ptcl, 2))
+        _particles_vels = np.ones((self.n_of_ptcl, 2)) * 0.1#np.random.normal(0.0, 0.05, (self.n_of_ptcl, 2))
         # sample time (seconds) as exponential sample
         _particles_lifes = np.random.uniform(high=1, size=self.n_of_ptcl)
 
@@ -231,33 +231,33 @@ class TopologicalParticleFilter():
             self.W[indices] = prob_dist[node]
 
         # weight speed
-        if len(self.speed_samples) == self.n_speed_samples:
-            def __gaussian(x, mu, sig):
-                return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
+        # if len(self.speed_samples) == self.n_speed_samples:
+        #     def __gaussian(x, mu, sig):
+        #         return np.exp(-np.power(x - mu, 2.) / (2 * np.power(sig, 2.)))
             
-            norm_current_sped = max(0.01, np.linalg.norm(self.current_speed))
-            unit_current_speed = self.current_speed / \
-                norm_current_sped
-            for p_i, _vel in enumerate(_vels):
-                # weight angle
-                _norm_vel = max(0.01, np.linalg.norm(_vel))
-                _unit_vel = _vel / _norm_vel
-                dot_product = np.dot(unit_current_speed, _unit_vel)
-                angle = np.arccos(dot_product)
-                self.W[p_i] += (np.cos(angle) + 1) / 4.
-                # weght norm
-                _n_w = __gaussian(_norm_vel, norm_current_sped, norm_current_sped * 0.5)
-                self.W[p_i] += _n_w / 4.
-            # print("After")
+        #     norm_current_sped = max(0.01, np.linalg.norm(self.current_speed))
+        #     unit_current_speed = self.current_speed / \
+        #         norm_current_sped
+        #     for p_i, _vel in enumerate(_vels):
+        #         # weight angle
+        #         _norm_vel = max(0.01, np.linalg.norm(_vel))
+        #         _unit_vel = _vel / _norm_vel
+        #         dot_product = np.dot(unit_current_speed, _unit_vel)
+        #         angle = np.arccos(dot_product)
+        #         self.W[p_i] += (np.cos(angle) + 1) / 4.
+        #         # weght norm
+        #         _n_w = __gaussian(_norm_vel, norm_current_sped, norm_current_sped * 0.5)
+        #         self.W[p_i] += _n_w / 4.
+        #     # print("After")
 
         # FOR TESTING assign velocity of gps
         # if len(self.speed_samples) == self.n_speed_samples:
         #     for i in range(len(self.predicted_particles)):
         #         self.predicted_particles[i].vel = self.current_speed
 
-        # print("current_speed {}".format(self.current_speed))
-        # print("avg ptcl speed {}, median {}, max {}, min {}".format(
-        #     np.average(_vels, axis=0), np.median(_vels, axis=0), np.max(_vels, axis=0), np.min(_vels, axis=0)))
+        print("current_speed {}".format(self.current_speed))
+        print("avg ptcl speed {}, median {}, max {}, min {}".format(
+            np.average(_vels, axis=0), np.median(_vels, axis=0), np.max(_vels, axis=0), np.min(_vels, axis=0)))
 
 
         # compute distributions distance
@@ -340,7 +340,7 @@ class TopologicalParticleFilter():
                 closeby_nodes = np.where((self.node_distances[particle.node]<=3))[0]
             particle.node = np.random.choice(closeby_nodes)
         
-        particle.vel += np.random.normal(0.0, 0.0005)
+        # particle.vel += np.random.normal(0.0, 0.0005)
         particle.life = max(0, particle.life + np.random.uniform(low=-0.1, high=0.1))
 
     def _resample(self, use_weight=True):

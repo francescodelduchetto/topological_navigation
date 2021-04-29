@@ -101,7 +101,7 @@ class PredictionModel:
         else:
             _new_particle.life = 0.0
             _new_particle.node = _new_node
-        _new_particle.vel = _new_vel
+        _new_particle.vel = particle.vel
         _new_particle.last_time_secs = timestamp_secs
 
 
