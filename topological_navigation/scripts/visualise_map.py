@@ -31,6 +31,7 @@ from topological_navigation.edge_std import *
 
 
 from topological_navigation.goto import *
+from topological_navigation.log_clicked_node import *
 
 
 from strands_navigation_msgs.msg import NavRoute
@@ -53,6 +54,10 @@ class VisualiseMap(object):
 
         self.map_markers = topological_navigation.map_marker.TopologicalVis()
         self.pol_markers = topological_navigation.policies.PoliciesVis()
+
+
+        rospy.loginfo("Log clicked node controller ...")
+        self.clicked_cont = log_click_controllers()
         
         if not noedit_mode:
             rospy.loginfo("Edge Controllers ...")
@@ -71,6 +76,9 @@ class VisualiseMap(object):
             self.goto_cont = go_to_controllers()
         else:
             rospy.logwarn("Edit only Visualisation mode ...")
+
+
+
             
         rospy.loginfo("Done ...")
 
