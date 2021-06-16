@@ -1,2 +1,2 @@
 geometry_msgs/PoseWithCovarianceStamped pose
-bool identifying
+string identity

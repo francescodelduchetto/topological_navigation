@@ -1,2 +1,2 @@
 bayesian_topological_localisation/DistributionStamped likelihood
-bool identifying
+string identity

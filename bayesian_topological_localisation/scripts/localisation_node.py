@@ -23,9 +23,9 @@ class TopologicalLocalisation():
         self.agents = []
         # observation subscribers for each agent
         self.obs_subscribers = []
-        # # publishers localisation result for each agent
+        # publishers localisation result for each agent
         self.res_publishers = []
-        # # publishers viz result for each agent
+        # publishers viz result for each agent
         self.viz_publishers = []
         # services for updating the state estimation
         self.upd_services = []
@@ -50,11 +50,11 @@ class TopologicalLocalisation():
 
         # default values for pf
         self.default_reinit_jsd_threshold = 0.975
-        self.default_unconnected_jump_threshold = 0.6
+        self.default_unconnected_jump_threshold = 0.4
 
         # declare services
-        rospy.Service("~localise_agent", LocaliseAgent, self._localise_agent_handler)
-        rospy.Service("~stop_localise", StopLocalise, self._stop_localise_handler)
+        # rospy.Service("~localise_agent", LocaliseAgent, self._localise_agent_handler)
+        # rospy.Service("~stop_localise", StopLocalise, self._stop_localise_handler)
         rospy.Service("~set_JSD_upper_bound", SetFloat64, self._set_JSD_upper_bound)
         rospy.Service("~set_entropy_lower_bound", SetFloat64, self._set_entropy_lower_bound)
 
