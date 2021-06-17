@@ -88,14 +88,14 @@ class TopologicalLocalisation():
     def _set_JSD_upper_bound(self, request):
         self.default_reinit_jsd_threshold = request.value
         for pf in self.pfs:
-            pf.set_JSD_upper_bound(request.value)
+            self.pf.set_JSD_upper_bound(request.value)
 
         return SetFloat64Response(True)
 
     def _set_entropy_lower_bound(self, request):
         self.default_unconnected_jump_threshold = request.value
         for pf in self.pfs:
-            pf.set_entropy_lower_bound(request.value)
+            self.pf.set_entropy_lower_bound(request.value)
 
         return SetFloat64Response(True)
 
@@ -154,17 +154,18 @@ class TopologicalLocalisation():
 
         # Initialize the prediction model
         # if prediction_model == LocaliseAgentRequest.PRED_CTMC:
-        pm = PredictionModel(
+        self.pm = PredictionModel(
             pred_type=PredictionModel.CTMC,
             node_coords=self.node_coords,
             node_diffs2D=self.node_diffs2D,
             node_distances=self.node_distances,
             connected_nodes=self.connected_nodes
+        )
 
         # Initialize a new instance of particle_filter
-        pf = TopologicalParticleFilter(
+        self.pf = TopologicalParticleFilter(
             num=self.n_particles,
-            prediction_model=pm,
+            prediction_model=self.pm,
             initial_spread_policy=self.initial_spread_policy,
             prediction_speed_decay=self.prediction_speed_decay,
             node_coords=self.node_coords,
@@ -177,37 +178,37 @@ class TopologicalLocalisation():
         )
 
         # publishers for visualizing all at once
-        self.cnviz_pub = rospy.Publisher("~estimated_nodes_viz".format(agent_name), MarkerArray, queue_size=10)
-        self.parviz_pub = rospy.Publisher("~particles_viz".format(agent_name), MarkerArray, queue_size=10)
+        self.cnviz_pub = rospy.Publisher("~estimated_nodes_viz", MarkerArray, queue_size=10)
+        self.parviz_pub = rospy.Publisher("~particles_viz", MarkerArray, queue_size=10)
 
         # subscribe to services for update
         self.upd_services.append({
-            rospy.Service("~update_pose_obs".format(name), UpdatePoseObservation, __update_pose_handler),
-            rospy.Service("~update_likelihood_obs".format(name), UpdateLikelihoodObservation, __update_likelihood_handler),
-            rospy.Service("~predict_stateless".format(name), Predict, __do_stateless_prediction),
-            rospy.Service("~update_stateless".format(name), UpdatePriorLikelihoodObservation, __do_stateless_update)
+            rospy.Service("~update_pose_obs", UpdatePoseObservation, self.__update_pose_handler),
+            rospy.Service("~update_likelihood_obs", UpdateLikelihoodObservation, self.__update_likelihood_handler),
+            # rospy.Service("~predict_stateless", Predict, self.__do_stateless_prediction),
+            # rospy.Service("~update_stateless", UpdatePriorLikelihoodObservation, self.__do_stateless_update)
         })
 
         # subscribe to topics receiving observation
         self.obs_subscribers.append((
-            rospy.Subscriber("~pose_obs".format(name), PoseObservation, __pose_obs_cb),
-            rospy.Subscriber("~likelihood_obs".format(name),
-                                LikelihoodObservation, __likelihood_obs_cb)
+            rospy.Subscriber("~pose_obs", PoseObservation, self.__pose_obs_cb),
+            rospy.Subscriber("~likelihood_obs",
+                                LikelihoodObservation, self.__likelihood_obs_cb)
         ))
 
         rospy.loginfo("n_particles:{}, initial_spread_policy:{}, prediction_model:{}, do_prediction:{}, prediction_rate:{}. prediction_speed_decay:{}".format(
-            n_particles, initial_spread_policy, prediction_model, do_prediction, prediction_rate, prediction_speed_decay
+            self.n_particles, self.initial_spread_policy, self.prediction_model, self.do_prediction, self.prediction_rate, self.prediction_speed_decay
         ))
         
         thr = None
-        if do_prediction:
-            rate = rospy.Rate(prediction_rate)
+        if self.do_prediction:
+            rate = rospy.Rate(self.prediction_rate)
             while not rospy.is_shutdown():
-                p_estimate, particles = pf.predict(
+                p_estimate, particles = self.pf.predict(
                     timestamp_secs=rospy.get_rostime().to_sec()
                 )
                 if not (p_estimate is None or particles is None): 
-                    self.__publish(p_estimate.node, particles)
+                    self.__publish(p_estimate, particles)
                 
                 rate.sleep()
         else:
@@ -250,7 +251,7 @@ class TopologicalLocalisation():
     def __publish(self, node, particles):
         particles_array = MarkerArray()
         nodes_array = MarkerArray()
-        for agent_i in range(len(agents)):
+        for agent_i in range(len(self.agents)):
             # publish localisation results
             self.res_publishers[agent_i][0].publish(self.__prepare_cn_msg(node[agent_i]))
             self.res_publishers[agent_i][1].publish(self.__prepare_pd_msg(particles[agent_i]))
@@ -290,11 +291,15 @@ class TopologicalLocalisation():
     ## topic callbacks ##
     # send pose observation to particle filter
     def __pose_obs_cb(self, msg):
+        # check if it's a newly seen agent
+        if msg.identity not in self.agents:
+            self._initialise_new_agent(msg.identity)
+
         if np.isfinite(msg.pose.pose.pose.position.x) and \
                 np.isfinite(msg.pose.pose.pose.position.y) and \
                 np.isfinite(msg.pose.pose.covariance[0]) and \
                 np.isfinite(msg.pose.pose.covariance[7]):
-            p_estimated, particles = pf.receive_pose_obs(
+            p_estimated, particles = self.pf.receive_pose_obs(
                 msg.pose.pose.pose.position.x,
                 msg.pose.pose.pose.position.y,
                 msg.pose.pose.covariance[0], # variance of x
@@ -304,13 +309,17 @@ class TopologicalLocalisation():
                 rospy.get_rostime().to_sec(),
                 identity=msg.identity
             )
-            self.__publish(p_estimated.node, particles)
+            self.__publish(p_estimated, particles)
         else:
             rospy.logwarn(
                 "Received non-admissible pose observation <{}, {}, {}, {}>, discarded".format(msg.pose.pose.pose.position.x, msg.pose.pose.pose.position.y, msg.pose.pose.covariance[0], msg.pose.pose.covariance[7]))
 
     # send likelihood observation to particle filter
     def __likelihood_obs_cb(self, msg):
+        # check if it's a newly seen agent
+        if msg.identity not in self.agents:
+            self._initialise_new_agent(msg.identity)
+
         if len(msg.likelihood.nodes) == len(msg.likelihood.values):
             try:
                 nodes = [np.where(self.node_names == nname)[0][0] for nname in msg.likelihood.nodes]
@@ -320,7 +329,7 @@ class TopologicalLocalisation():
             else:
                 values = np.array(msg.likelihood.values)
                 if np.isfinite(values).all() and (values >= 0.).all() and np.sum(values) > 0:
-                    p_estimated, particles = pf.receive_likelihood_obs(
+                    p_estimated, particles = self.pf.receive_likelihood_obs(
                         nodes, 
                         msg.likelihood.values,
                         # (rospy.get_rostime().to_sec(), msg.likelihood.header.stamp.to_sec())[
@@ -328,7 +337,7 @@ class TopologicalLocalisation():
                         rospy.get_rostime().to_sec(),
                         identity=msg.identity
                     )
-                    self.__publish(p_estimated.node, particles)
+                    self.__publish(p_estimated, particles)
                 else:
                     rospy.logwarn(
                         "Received non-admissible likelihood observation {}, discarded".format(msg.likelihood.values))
@@ -339,11 +348,15 @@ class TopologicalLocalisation():
     ## Services handlers ##
     # Get the pose observation and returns the localisation result
     def __update_pose_handler(self, request):
+        # check if it's a newly seen agent
+        if request.identity not in self.agents:
+            self._initialise_new_agent(request.identity)
+
         if np.isfinite(request.pose.pose.pose.position.x) and \
                 np.isfinite(request.pose.pose.pose.position.y) and \
                 np.isfinite(request.pose.pose.covariance[0]) and \
                 np.isfinite(request.pose.pose.covariance[7]):
-            p_estimated, particles = pf.receive_pose_obs(
+            p_estimated, particles = self.pf.receive_pose_obs(
                 request.pose.pose.pose.position.x,
                 request.pose.pose.pose.position.y,
                 request.pose.pose.covariance[0],  # variance of x
@@ -353,10 +366,10 @@ class TopologicalLocalisation():
                 rospy.get_rostime().to_sec(),
                 identity=request.identity
             )
-            self.__publish(p_estimated.node, particles)
+            self.__publish(p_estimated, particles)
             resp = UpdatePoseObservationResponse()
             resp.success = True
-            resp.estimated_node = self.__prepare_cn_msg(p_estimated.node).data
+            resp.estimated_node = p_estimated#self.__prepare_cn_msg(p_estimated.node).data
             resp.current_prob_dist = self.__prepare_pd_msg(particles)
             return(resp)
         else:
@@ -370,6 +383,10 @@ class TopologicalLocalisation():
 
     # get a likelihood observation and return localisation result
     def __update_likelihood_handler(self, request):
+        # check if it's a newly seen agent
+        if request.identity not in self.agents:
+            self._initialise_new_agent(request.identity)
+
         if len(request.likelihood.nodes) == len(request.likelihood.values):
             try:
                 nodes = [np.where(self.node_names == nname)[0][0]
@@ -381,7 +398,7 @@ class TopologicalLocalisation():
                 values = np.array(request.likelihood.values)
                 # rospy.loginfo("Received likelihood: {}".format(zip(nodes, values)))
                 if np.isfinite(values).all() and (values >= 0.).all() and np.sum(values) > 0:
-                    p_estimated, particles = pf.receive_likelihood_obs(
+                    p_estimated, particles = self.pf.receive_likelihood_obs(
                         nodes,
                         request.likelihood.values,
                         # (rospy.get_rostime().to_sec(), request.likelihood.header.stamp.to_sec())[
@@ -389,10 +406,10 @@ class TopologicalLocalisation():
                         rospy.get_rostime().to_sec(),
                         identity=request.identity
                     )
-                    self.__publish(p_estimated.node, particles, agent=request.identity)
+                    self.__publish(p_estimated, particles, agent=request.identity)
                     resp = UpdateLikelihoodObservationResponse()
                     resp.success = True
-                    resp.estimated_node = self.__prepare_cn_msg(p_estimated.node).data
+                    resp.estimated_node = p_estimated#self.__prepare_cn_msg(p_estimated.node).data
                     resp.current_prob_dist = self.__prepare_pd_msg(particles)
                     return(resp)
                 else:

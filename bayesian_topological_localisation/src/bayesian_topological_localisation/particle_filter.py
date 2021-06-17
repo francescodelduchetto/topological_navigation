@@ -31,9 +31,9 @@ class TopologicalParticleFilter():
         self.node_names = node_names
 
         # current particles
-        self.particles = [None] * self.n_of_ptcl  # np.empty((self.n_of_ptcl))
+        self.particles = np.array([None] * self.n_of_ptcl)  # np.empty((self.n_of_ptcl))
         # particles after prediction phase
-        self.predicted_particles = [None] * self.n_of_ptcl #np.empty((self.n_of_ptcl))
+        self.predicted_particles = np.array([None] * self.n_of_ptcl) #np.empty((self.n_of_ptcl))
         # particles weight
         self.W = np.ones((self.n_of_ptcl))
 
@@ -257,8 +257,8 @@ class TopologicalParticleFilter():
         ####
 
         # weight pose
-        _all_nodes = np.arange(self.node_coords.shape[0])
-        # prob_dist = self._normal_pdf(obs_x, obs_y, cov_x, cov_y, _all_nodes)
+        _all_nodes = np.arange(self.node_coords.shape[0]).tolist()
+        prob_dist = self._normal_pdf(obs_x, obs_y, cov_x, cov_y, _all_nodes)
 
         # self.W = np.zeros((self.n_of_ptcl))
         # for _, (node, indices) in enumerate(zip(nodes, indices_groups)):
@@ -385,10 +385,11 @@ class TopologicalParticleFilter():
     # produce the node estimate based on topological mass from particles and their weight
     def _estimate_node(self, use_weight=True):
         for (identity, identity_idx) in sorted(self.identities.items(), key=lambda x:x[1]):
-            _identity_predicted_particles = self.predicted_particles[self.weighted_masks[identity_idx]]
             # if True it means this group of particles has not been updated
-            if len(_identity_predicted_particles) == 0:
+            if len(self.weighted_masks[identity_idx]) == 0:
                 continue
+
+            _identity_predicted_particles = self.predicted_particles[self.weighted_masks[identity_idx]]
 
             _nodes = [p.node for p in _identity_predicted_particles]
             nodes, indices_start, counts = np.unique(
@@ -422,10 +423,11 @@ class TopologicalParticleFilter():
 
     def _resample(self, use_weight=True):
         for (identity, identity_idx) in sorted(self.identities.items(), key=lambda x:x[1]):
-            _identity_predicted_particles = self.predicted_particles[self.weighted_masks[identity_idx]]
             # if True it means this group of particles has not been updated
-            if len(_identity_predicted_particles) == 0:
+            if len(self.weighted_masks[identity_idx]) == 0:
                 continue
+
+            _identity_predicted_particles = self.predicted_particles[self.weighted_masks[identity_idx]]
             if use_weight:
                 prob = self._normalize(self.W[self.weighted_masks[identity_idx]])
                 particles_idxs = np.random.choice(
@@ -481,7 +483,7 @@ class TopologicalParticleFilter():
                 particles[idx] = self.particles[idx].__copy__()
             p_estimate = [None] * len(self.identities) 
             for idx in range(len(self.last_estimate)):
-                p_estimate[idx] = self.last_estimate.__copy__()
+                p_estimate[idx] = self.last_estimate[idx]
 
         self.lock.release()
 
@@ -524,7 +526,7 @@ class TopologicalParticleFilter():
             particles[idx] = self.particles[idx].__copy__()
         p_estimate = [None] * len(self.identities) 
         for idx in range(len(self.last_estimate)):
-            p_estimate[idx] = self.last_estimate.__copy__()
+            p_estimate[idx] = self.last_estimate[idx]
 
         self.lock.release()
 
@@ -565,7 +567,7 @@ class TopologicalParticleFilter():
             particles[idx] = self.particles[idx].__copy__()
         p_estimate = [None] * len(self.identities) 
         for idx in range(len(self.last_estimate)):
-            p_estimate[idx] = self.last_estimate.__copy__()
+            p_estimate[idx] = self.last_estimate[idx]
 
         self.lock.release()
 
