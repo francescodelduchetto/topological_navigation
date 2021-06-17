@@ -2,7 +2,7 @@ import numpy as np
 
 class Particle():
 
-    def __init__(self, node, vel, life, timestamp_secs, identity, n_steps_vel=40):
+    def __init__(self, node, vel, life, timestamp_secs, identity="UNK", n_steps_vel=40):
         self.node = node
         self.vel = np.clip(np.array(vel), -1, 1)
         self.life = life
@@ -12,7 +12,7 @@ class Particle():
 
     def __copy__(self):
         newone = Particle(self.node, np.copy(self.vel),
-                          self.life, self.last_time_secs, np.copy(self.identity), self.n_steps_vel)
+                          self.life, self.last_time_secs, str(self.identity), self.n_steps_vel)
         # newone.__dict__.update(self.__dict__)
         return newone
     

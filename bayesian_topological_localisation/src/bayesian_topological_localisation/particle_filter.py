@@ -42,7 +42,7 @@ class TopologicalParticleFilter():
         # life time in current node
         self.life = np.zeros((self.n_of_ptcl))
         # last estimated node
-        self.last_estimate = None
+        self.last_estimate = [None]
         # current estimate of speed
         self.current_speed = np.zeros((2))
         # num samples to use to estimate picker speed
@@ -53,15 +53,26 @@ class TopologicalParticleFilter():
         # timestamp of poses
         self.last_ts = np.zeros((1))
         # if to jump to only connected nodes 
-        self.only_connected = False        
+        self.only_connected = False
 
         self.print_debug = True
+
+        # the list of identities that we are tracking, UNK is there by default always
+        self.identities = {"UNK" : 0}
+        # the indices to access the particles of a specific identity, all are UNK at the beginning
+        self.identity_masks = [np.arange(self.n_of_ptcl).tolist()]
+        # the indices of the particles that have been weighted in this step and need to be resampled
+        self.weighted_masks = [[]]
 
         self.reinit_jsd_threshold = reinit_jsd_threshold if reinit_jsd_threshold is not None else self.DEFAULT_REINIT_JSD_THRESHOLD
         self.unconnected_jump_threshold = unconnected_jump_threshold if unconnected_jump_threshold is not None else self.DEFAULT_UNCONNECTED_JUMP_THRESHOLD
 
+        # initialize as uniform over the entire map 
+        self._initialize_uniform(rospy.get_rostime().to_sec())
+
         self.lock = threading.Lock()
 
+    # make it a distribution over the entire map
     def _expand_distribution(self, prob, nodes):
         if type(nodes) == np.ndarray:
             _nodes = nodes.tolist()
@@ -99,6 +110,12 @@ class TopologicalParticleFilter():
         up = np.exp(- 0.5 * (diffs2D * cov_M.I * diffs2D.T).diagonal())
         probs = np.array(up / np.sqrt((2*np.pi)**2 * det_M))
         return self._normalize(probs.reshape((-1)))
+
+    def _add_new_identity(self, identity):
+        self.identities.update({identity : len(self.identities)})
+        self.identity_masks.append([])
+        self.weighted_masks.append([])
+        self.last_estimate.append([None])
 
     def _update_speed(self, obs_x=None, obs_y=None, timestamp_secs=None):
         if not (obs_x is None or obs_y is None):
@@ -194,8 +211,30 @@ class TopologicalParticleFilter():
 
         return distance
 
-    def _predict(self, timestamp_secs):
+    def _group_particles_nodes(self, particles, indices_to_consider=None):
+        _nodes = np.array([p.node for p in particles])
+        idx_sort = np.argsort(_nodes)
+        # keep only those that should be considered
+        if indices_to_consider is not None:
+            idx_sort = [idx for idx in idx_sort if idx in indices_to_consider]
+        # find unique nodes, the starting indices and the counts
+        nodes, indices_start, counts = np.unique(
+            _nodes[idx_sort], return_index=True, return_counts=True)
+        indices_groups = np.split(idx_sort, indices_start[1:])
+        nodes = nodes.tolist()
 
+        return nodes, indices_groups, counts
+
+    # turn particles[indices].identity = new_identity
+    def _turn_to_identity(self, particles, indices, new_identity):
+        for _particle, _idx in zip(particles[indices], indices):
+            self.identity_masks[self.identities[_particle.identity]].remove(_idx)
+            _particle.identity = new_identity
+
+        self.identity_masks[self.identities[new_identity]] += indices
+
+    def _predict(self, timestamp_secs):
+        # NOTE predict should not change the identity of a particle
         for particle_idx in range(self.n_of_ptcl):
 
             p = self.particles[particle_idx]
@@ -208,14 +247,9 @@ class TopologicalParticleFilter():
             self.predicted_particles[particle_idx] = _new_p
 
     # weighting with normal distribution with var around the observation
-    def _weight_pose(self, obs_x, obs_y, cov_x, cov_y, timestamp_secs, identifying):
-        _nodes = np.array([p.node for p in self.predicted_particles])
-        _vels = np.array([p.vel for p in self.predicted_particles])
-        idx_sort = np.argsort(_nodes)
-        nodes, indices_start, counts = np.unique(
-            _nodes[idx_sort], return_index=True, return_counts=True)
-        indices_groups = np.split(idx_sort, indices_start[1:])
-        nodes = nodes.tolist()
+    def _weight_pose(self, obs_x, obs_y, cov_x, cov_y, timestamp_secs, identity):
+        # _vels = np.array([p.vel for p in self.predicted_particles])
+        # nodes, indices_groups, counts = self._group_particles_nodes(self.predicted_particles)
 
         #### DEBUG
         # p_entropy = self._compute_entropy(self._normalize(counts))
@@ -224,11 +258,13 @@ class TopologicalParticleFilter():
 
         # weight pose
         _all_nodes = np.arange(self.node_coords.shape[0])
-        prob_dist = self._normal_pdf(obs_x, obs_y, cov_x, cov_y, _all_nodes)
+        # prob_dist = self._normal_pdf(obs_x, obs_y, cov_x, cov_y, _all_nodes)
 
-        self.W = np.zeros((self.n_of_ptcl))
-        for _, (node, indices) in enumerate(zip(nodes, indices_groups)):
-            self.W[indices] = prob_dist[node]
+        # self.W = np.zeros((self.n_of_ptcl))
+        # for _, (node, indices) in enumerate(zip(nodes, indices_groups)):
+        #     self.W[indices] = prob_dist[node]
+
+        self._weight_likelihood(_all_nodes, prob_dist, timestamp_secs, identity)
 
         # # weight speed
         # if len(self.speed_samples) == self.n_speed_samples:
@@ -261,8 +297,8 @@ class TopologicalParticleFilter():
 
 
         # compute distributions distance
-        js_distance = self._compute_jensen_shannon_distance(
-            self._expand_distribution(self._normalize(counts), nodes), prob_dist)
+        # js_distance = self._compute_jensen_shannon_distance(
+        #     self._expand_distribution(self._normalize(counts), nodes), prob_dist)
         #### DEBUG 
         # o_entropy = self._compute_entropy(prob_dist)
         # rospy.loginfo("Entropy of pose observation: {}".format(o_entropy))
@@ -270,30 +306,63 @@ class TopologicalParticleFilter():
         # rospy.loginfo("Jensen-Shannon distance: {}".format(js_distance))
         ####
 
-        # it measn the particles are "disjoint" from this obs
-        if identifying and js_distance > self.reinit_jsd_threshold:
-            if self.print_debug:
-                rospy.logwarn("Reinitializing particles, JS distance between prior and likelihood {} is greater than {}".format(
-                    js_distance, self.reinit_jsd_threshold))
-            self._initialize_wt_pose(obs_x, obs_y, cov_x, cov_y, timestamp_secs)
-            self.only_connected = False # we are not really sure now anymore
+        # # it measn the particles are "disjoint" from this obs
+        # if identifying and js_distance > self.reinit_jsd_threshold:
+        #     if self.print_debug:
+        #         rospy.logwarn("Reinitializing particles, JS distance between prior and likelihood {} is greater than {}".format(
+        #             js_distance, self.reinit_jsd_threshold))
+        #     self._initialize_wt_pose(obs_x, obs_y, cov_x, cov_y, timestamp_secs)  # NOTE how is this going to affect the resampling with weights?
+        #     self.only_connected = False # we are not really sure now anymore
 
     # weighting wih a given likelihood distribution
-    def _weight_likelihood(self, nodes_dist, likelihood, timestamp_secs, identifying):
-        _nodes = np.array([p.node for p in self.predicted_particles])
-        idx_sort = np.argsort(_nodes)
-        nodes, indices_start, counts = np.unique(
-            _nodes[idx_sort], return_index=True, return_counts=True)
-        indices_groups = np.split(idx_sort, indices_start[1:])
-        nodes = nodes.tolist()
+    def _weight_likelihood(self, nodes_dist, likelihood, timestamp_secs, identity):
+        # reset weighted masks
+        for _i in range(len(self.weighted_masks)):
+            self.weighted_masks[_i] = []
 
-        # p_entropy = self._compute_entropy(self._normalize(counts))
-        # rospy.loginfo("Entropy of prior: {}".format(p_entropy))
+        likelihood = self._normalize(likelihood)
+        # TODO 
+        # X add the L * UNK as well and change them to identity
+        # - check what to do with the thresholds
+        
+        if identity == "UNK":
+            identities_to_weight = self.identities
+            identities_to_sample_from = []
+        else:
+            identities_to_weight = [identity]
+            identities_to_sample_from = ["UNK"]
+        
+        
+        for weigth_identity in identities_to_weight:
+            nodes, indices_groups, counts = self._group_particles_nodes(
+                self.predicted_particles,
+                indices_to_consider=self.identity_masks[self.identities[weigth_identity]]
+            )
+            # weight the particles with same identity
+            self.W = np.zeros((self.n_of_ptcl)) # TODO this has to become a relative to identity only
+            for _, (node, indices) in enumerate(zip(nodes, indices_groups)):
+                if node in nodes_dist:
+                    self.W[indices] = likelihood[nodes_dist.index(node)]
 
-        self.W = np.zeros((self.n_of_ptcl))
-        for _, (node, indices) in enumerate(zip(nodes, indices_groups)):
-            if node in nodes_dist:
-                self.W[indices] = likelihood[nodes_dist.index(node)]
+                
+
+        # consider the particles to be translated into this identity
+        for sample_identity in identities_to_sample_from:
+            nodes, indices_groups, counts = self._group_particles_nodes(
+                self.predicted_particles,
+                indices_to_consider=self.identity_masks[self.identities[sample_identity]]
+            )
+            for _, (node, indices, count) in enumerate(zip(nodes, indices_groups, counts)):
+                if node in nodes_dist:
+                    n_of_samples = int(round(likelihood[nodes_dist.index(node)] * count))
+                    sampled_indices = np.random.choice(indices, n_of_samples)
+                    self.W[sampled_indices] = likelihood[nodes_dist.index(node)]
+                    # turn them to identity
+                    self._turn_to_identity(self.predicted_particles, sampled_indices, identity)
+
+
+        for weigth_identity in identities_to_weight:
+            self.weighted_masks[self.identities[weigth_identity]] = self.identity_masks[self.identities[weigth_identity]]
 
         ##### DEBUG observation compute entropy
         # o_entropy = self._compute_entropy(self._normalize(likelihood))
@@ -301,33 +370,40 @@ class TopologicalParticleFilter():
         ####
 
         # compute distributions distance
-        js_distance = self._compute_jensen_shannon_distance(
-            self._expand_distribution(self._normalize(counts), nodes), self._expand_distribution(self._normalize(likelihood), nodes_dist))
+        # js_distance = self._compute_jensen_shannon_distance(
+        #     self._expand_distribution(self._normalize(counts), nodes), self._expand_distribution(self._normalize(likelihood), nodes_dist))
         # if self.print_debug and identifying: rospy.loginfo("Jensen-Shannon distance: {}".format(js_distance))
 
-        # it measn the particles are "disjoint" from this obs
-        if identifying and js_distance > self.reinit_jsd_threshold:
-            if self.print_debug:
-                rospy.logwarn("Reinitializing particles, JS distance between prior and likelihood {} is greater than {}".format(
-                    js_distance, self.reinit_jsd_threshold))
-            self._initialize_wt_likelihood(nodes_dist, likelihood, timestamp_secs)
-            self.only_connected = False # we are not really sure now anymore
+        # # it measn the particles are "disjoint" from this obs
+        # if identifying and js_distance > self.reinit_jsd_threshold:
+        #     if self.print_debug:
+        #         rospy.logwarn("Reinitializing particles, JS distance between prior and likelihood {} is greater than {}".format(
+        #             js_distance, self.reinit_jsd_threshold))
+        #     self._initialize_wt_likelihood(nodes_dist, likelihood, timestamp_secs) # NOTE how is this going to affect the resampling with weights?
+        #     self.only_connected = False # we are not really sure now anymore
 
     # produce the node estimate based on topological mass from particles and their weight
     def _estimate_node(self, use_weight=True):
-        _nodes = [p.node for p in self.predicted_particles]
-        nodes, indices_start, counts = np.unique(
-            _nodes, return_index=True, return_counts=True)
-        masses = []
-        if use_weight:
-            for (_, index_start, count) in zip(nodes, indices_start, counts):
-                masses.append(self.W[index_start] * count)
-        else:
-            masses = counts
-        # if self.print_debug:
-        #     print("Masses: {}".format(zip(self.node_names[nodes], masses, counts)))
-        self.last_estimate = self.predicted_particles[indices_start[np.argmax(
-            masses)]]
+        for (identity, identity_idx) in sorted(self.identities.items(), key=lambda x:x[1]):
+            _identity_predicted_particles = self.predicted_particles[self.weighted_masks[identity_idx]]
+            # if True it means this group of particles has not been updated
+            if len(_identity_predicted_particles) == 0:
+                continue
+
+            _nodes = [p.node for p in _identity_predicted_particles]
+            nodes, indices_start, counts = np.unique(
+                _nodes, return_index=True, return_counts=True)
+            masses = []
+            if use_weight:
+                for (_, index_start, count) in zip(nodes, indices_start, counts):
+                    masses.append(self.W[self.weighted_masks[identity_idx]][index_start] * count)
+            else:
+                masses = counts
+            # if self.print_debug:
+            #     print("Masses: {}".format(zip(self.node_names[nodes], masses, counts)))
+
+            self.last_estimate[identity_idx] = _identity_predicted_particles[indices_start[np.argmax(masses)]]
+
         # if self.print_debug:
         #     print("Node estimate: {} {}".format(self.node_names[self.last_estimate.node], self.last_estimate))
 
@@ -339,38 +415,44 @@ class TopologicalParticleFilter():
             else:
                 closeby_nodes = np.where((self.node_distances[particle.node]<=3))[0]
             particle.node = np.random.choice(closeby_nodes)
+            particle.identity = np.random.choice(self.identities.keys())
         
         particle.vel += np.random.normal(0.0, 0.0005)
         particle.life = max(0, particle.life + np.random.uniform(low=-0.1, high=0.1))
 
     def _resample(self, use_weight=True):
-        if use_weight:
-            prob = self._normalize(self.W)
-            particles_idxs = np.random.choice(
-                np.arange(len(self.particles)), self.n_of_ptcl, p=prob)
-        else:
-            particles_idxs = np.arange(len(self.particles))
-        
-        for pi, idx in enumerate(particles_idxs):
-            self.particles[pi] = self.predicted_particles[idx].__copy__()
+        for (identity, identity_idx) in sorted(self.identities.items(), key=lambda x:x[1]):
+            _identity_predicted_particles = self.predicted_particles[self.weighted_masks[identity_idx]]
+            # if True it means this group of particles has not been updated
+            if len(_identity_predicted_particles) == 0:
+                continue
+            if use_weight:
+                prob = self._normalize(self.W[self.weighted_masks[identity_idx]])
+                particles_idxs = np.random.choice(
+                    self.weighted_masks[identity_idx], len(_identity_predicted_particles), p=prob)
+            else:
+                particles_idxs = self.weighted_masks[identity_idx]
+            
+            for pi, idx in enumerate(particles_idxs):
+                self.particles[self.weighted_masks[identity_idx]][pi] = _identity_predicted_particles[idx].__copy__()
 
-        # add noise to the state of the new particles
-        for p in self.particles:
-            # if self.print_debug: print("clean", str(p))
-            self._add_noise(p)
-            # if self.print_debug: print("noisy", str(p))
+            # add noise to the state of the new particles
+            for p in self.particles[self.weighted_masks[identity_idx]]:
+                # if self.print_debug: print("clean", str(p))
+                self._add_noise(p)
+                # if self.print_debug: print("noisy", str(p))
 
-        # compute entropy of the new distribution
-        nodes, indices_start, counts = np.unique(
-            [p.node for p in self.particles], return_index=True, return_counts=True)
-        p_entropy = self._compute_entropy(self._normalize(counts))
-        # if self.print_debug: 
-        #     rospy.loginfo("Final entropy : {} ({})".format(p_entropy, self.only_connected))
+            # compute entropy of the new distribution
+            nodes, indices_start, counts = np.unique(
+                [p.node for p in self.particles[self.weighted_masks[identity_idx]]], return_index=True, return_counts=True)
+            p_entropy = self._compute_entropy(self._normalize(counts))
+            # if self.print_debug: 
+            #     rospy.loginfo("Final entropy : {} ({})".format(p_entropy, self.only_connected))
 
-        if not self.only_connected and p_entropy < self.unconnected_jump_threshold:
-            self.only_connected = True
-            if self.print_debug:
-                rospy.logwarn("Stop jumping to unconnected nodes, entropy of current particles distribution {} smaller than {}.".format(p_entropy, self.unconnected_jump_threshold))
+        # if not self.only_connected and p_entropy < self.unconnected_jump_threshold:
+        #     self.only_connected = True
+        #     if self.print_debug:
+        #         rospy.logwarn("Stop jumping to unconnected nodes, entropy of current particles distribution {} smaller than {}.".format(p_entropy, self.unconnected_jump_threshold))
 
     def set_JSD_upper_bound(self, bound):
         self.reinit_jsd_threshold = bound
@@ -397,36 +479,41 @@ class TopologicalParticleFilter():
             particles = [None] * len(self.particles)
             for idx in range(len(self.particles)):
                 particles[idx] = self.particles[idx].__copy__()
-            p_estimate = self.last_estimate.__copy__()
+            p_estimate = [None] * len(self.identities) 
+            for idx in range(len(self.last_estimate)):
+                p_estimate[idx] = self.last_estimate.__copy__()
 
         self.lock.release()
 
         return p_estimate, particles
 
-    def receive_pose_obs(self, obsx, obsy, covx, covy, timestamp_secs, identifying):
+    def receive_pose_obs(self, obsx, obsy, covx, covy, timestamp_secs, identity):
         """Performs a full bayesian optimization step of the particles by integrating the new pose observation"""
         self.lock.acquire()
 
-        if self.last_estimate is None:  # never received an observation before
-            # if the observation can be a false positive do not initialize the PF with it
-            if identifying:
-                self._initialize_wt_pose(obsx, obsy, covx, covy, timestamp_secs)
-            else:
-                self._initialize_uniform(timestamp_secs)
+        if not identity in self.identities:
+            self._add_new_identity(identity)
+
+        # if self.last_estimate is None:  # never received an observation before
+        #     # if the observation can be a false positive do not initialize the PF with it
+        #     if identifying:
+        #         self._initialize_wt_pose(obsx, obsy, covx, covy, timestamp_secs)
+        #     else:
+        #         self._initialize_uniform(timestamp_secs)
             
-            use_weight = False
+        #     use_weight = False
+        # else:
+        if identity != "UNK":
+            self._update_speed(obsx, obsy, timestamp_secs)
         else:
-            if identifying:
-                self._update_speed(obsx, obsy, timestamp_secs)
-            else:
-                self._update_speed()
+            self._update_speed()
 
-            self._predict(timestamp_secs)
+        self._predict(timestamp_secs)
 
-            self._weight_pose(obsx, obsy, covx, covy,
-                              timestamp_secs, identifying)
-            
-            use_weight = True
+        self._weight_pose(obsx, obsy, covx, covy,
+                            timestamp_secs, identity)
+        
+        use_weight = True
 
         self._estimate_node(use_weight=use_weight)
 
@@ -435,34 +522,39 @@ class TopologicalParticleFilter():
         particles = [None] * len(self.particles)
         for idx in range(len(self.particles)):
             particles[idx] = self.particles[idx].__copy__()
-        p_estimate = self.last_estimate.__copy__()
+        p_estimate = [None] * len(self.identities) 
+        for idx in range(len(self.last_estimate)):
+            p_estimate[idx] = self.last_estimate.__copy__()
 
         self.lock.release()
 
         return p_estimate, particles
 
-    def receive_likelihood_obs(self, nodes, likelihood, timestamp_secs, identifying):
+    def receive_likelihood_obs(self, nodes, likelihood, timestamp_secs, identity):
         """Performs a full bayesian optimization step of the particles by integrating the new likelihood distribution observation"""
         self.lock.acquire()
         
-        if self.last_estimate is None:  # never received an observation before
-            # if the observation can be a false positive do not initialize the PF with it
-            if identifying:
-                self._initialize_wt_likelihood(
-                    nodes, likelihood, timestamp_secs)
-            else:
-                self._initialize_uniform(timestamp_secs)
+        if not identity in self.identities:
+            self._add_new_identity(identity)
+
+        # if self.last_estimate is None:  # never received an observation before
+        #     # if the observation can be a false positive do not initialize the PF with it
+        #     if identifying:
+        #         self._initialize_wt_likelihood(
+        #             nodes, likelihood, timestamp_secs)
+        #     else:
+        #         self._initialize_uniform(timestamp_secs)
             
-            use_weight = False
-        else:
-            self._update_speed()
+        #     use_weight = False
+        # else:
+        self._update_speed()
 
-            self._predict(timestamp_secs)
+        self._predict(timestamp_secs)
 
-            self._weight_likelihood(
-                nodes, likelihood, timestamp_secs, identifying)
+        self._weight_likelihood(
+            nodes, likelihood, timestamp_secs, identity)
 
-            use_weight = True
+        use_weight = True
 
         self._estimate_node(use_weight=use_weight)
 
@@ -471,7 +563,9 @@ class TopologicalParticleFilter():
         particles = [None] * len(self.particles)
         for idx in range(len(self.particles)):
             particles[idx] = self.particles[idx].__copy__()
-        p_estimate = self.last_estimate.__copy__()
+        p_estimate = [None] * len(self.identities) 
+        for idx in range(len(self.last_estimate)):
+            p_estimate[idx] = self.last_estimate.__copy__()
 
         self.lock.release()
 
