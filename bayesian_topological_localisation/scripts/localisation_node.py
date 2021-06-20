@@ -37,8 +37,6 @@ class TopologicalLocalisation():
         # self.pfs = []
         # agents colors
         self.agents_colors = []
-        # agents markers
-        self.agents_markers = []
 
         # these will contain info about the topology
         self.topo_map = None
@@ -62,7 +60,7 @@ class TopologicalLocalisation():
         # default name is unknown if requested is ''
         # name = (request.name, 'unknown')[request.name == '']
         # default particles number is 300 if requested is 0
-        self.n_particles = 1000 # (request.n_particles, 3000)[self.n_particles <= 0]
+        self.n_particles = 5000 # (request.n_particles, 3000)[self.n_particles <= 0]
         self.initial_spread_policy = 0
         self.prediction_model = 0
         self.do_prediction = True
@@ -85,6 +83,7 @@ class TopologicalLocalisation():
 
         rospy.loginfo("DONE")
 
+
     def _set_JSD_upper_bound(self, request):
         self.default_reinit_jsd_threshold = request.value
         for pf in self.pfs:
@@ -99,7 +98,37 @@ class TopologicalLocalisation():
 
         return SetFloat64Response(True)
 
+    def _marker_factory(self, agent_name, particle=True):
+        marker = Marker()
+        if particle:
+            # the particle
+            marker.header.frame_id = "/map"
+            marker.type = marker.SPHERE
+            marker.pose.position.z = 0
+            marker.pose.orientation.w = 1
+            marker.scale.x = 0.1
+            marker.scale.y = 0.1
+            marker.scale.z = 0.1
+            marker.color.r = self.agents_colors[self.agents.index(agent_name)][1][0]
+            marker.color.g = self.agents_colors[self.agents.index(agent_name)][1][1]
+            marker.color.b = self.agents_colors[self.agents.index(agent_name)][1][2]
+            marker.color.a = self.agents_colors[self.agents.index(agent_name)][1][3]
+        else:
+            marker.header.frame_id = "/map"
+            marker.type = marker.SPHERE
+            marker.pose.position.z = 1.2
+            marker.pose.orientation.w = 1
+            marker.scale.x = 0.5
+            marker.scale.y = 0.5
+            marker.scale.z = 0.5
+            marker.color.r = self.agents_colors[self.agents.index(agent_name)][0][0]
+            marker.color.g = self.agents_colors[self.agents.index(agent_name)][0][1]
+            marker.color.b = self.agents_colors[self.agents.index(agent_name)][0][2]
+            marker.color.a = self.agents_colors[self.agents.index(agent_name)][0][3]
+        return marker
+
     def _initialise_new_agent(self, agent_name, color=None):
+        rospy.loginfo("Initialising new agent {}".format(agent_name))
         # choose a color for the new agent
         _colors = [
             plt.cm.tab20((len(self.agents) * 2) % len(plt.cm.tab20.colors)),    # marker color
@@ -118,36 +147,8 @@ class TopologicalLocalisation():
         parviz_pub = rospy.Publisher("{}/particles_viz".format(agent_name), MarkerArray, queue_size=10)
         # staparviz_pub = rospy.Publisher("{}/stateless_particles_viz".format(agent_name), MarkerArray, queue_size=10)
         self.viz_publishers.append((cnviz_pub, parviz_pub))
-        # the estimated node
-        nodemkrmsg = Marker()
-        nodemkrmsg.header.frame_id = "/map"
-        nodemkrmsg.type = nodemkrmsg.SPHERE
-        nodemkrmsg.pose.position.z = 1
-        nodemkrmsg.pose.orientation.w = 1
-        nodemkrmsg.scale.x = 0.5
-        nodemkrmsg.scale.y = 0.5
-        nodemkrmsg.scale.z = 0.5
-        nodemkrmsg.color.r = _colors[0][0]
-        nodemkrmsg.color.g = _colors[0][1]
-        nodemkrmsg.color.b = _colors[0][2]
-        nodemkrmsg.color.a = _colors[0][3]
-        # the particle
-        ptcmkrmsg = Marker()
-        ptcmkrmsg.header.frame_id = "/map"
-        ptcmkrmsg.type = ptcmkrmsg.SPHERE
-        ptcmkrmsg.pose.position.z = 0
-        ptcmkrmsg.pose.orientation.w = 1
-        ptcmkrmsg.scale.x = 0.1
-        ptcmkrmsg.scale.y = 0.1
-        ptcmkrmsg.scale.z = 0.1
-        ptcmkrmsg.color.r = _colors[1][0]
-        ptcmkrmsg.color.g = _colors[1][1]
-        ptcmkrmsg.color.b = _colors[1][2]
-        ptcmkrmsg.color.a = _colors[1][3]
-        # the particles array
-        ptcsarrmsg = MarkerArray()
 
-        self.agents_markers.append((nodemkrmsg, ptcmkrmsg, ptcsarrmsg))
+
 
     def _loop(self):
         rospy.loginfo("Starting loop")
@@ -199,17 +200,20 @@ class TopologicalLocalisation():
         rospy.loginfo("n_particles:{}, initial_spread_policy:{}, prediction_model:{}, do_prediction:{}, prediction_rate:{}. prediction_speed_decay:{}".format(
             self.n_particles, self.initial_spread_policy, self.prediction_model, self.do_prediction, self.prediction_rate, self.prediction_speed_decay
         ))
-        
+
+        self._initialise_new_agent("UNK")
+
         thr = None
         if self.do_prediction:
             rate = rospy.Rate(self.prediction_rate)
             while not rospy.is_shutdown():
+                self.internal_lock.acquire()
                 p_estimate, particles = self.pf.predict(
                     timestamp_secs=rospy.get_rostime().to_sec()
                 )
                 if not (p_estimate is None or particles is None): 
                     self.__publish(p_estimate, particles)
-                
+                self.internal_lock.release()
                 rate.sleep()
         else:
             rospy.spin()
@@ -217,6 +221,7 @@ class TopologicalLocalisation():
         rospy.loginfo("Exiting.")
 
     def __prepare_pd_msg(self, particles, timestamp=None):
+        # print(particles)
         pdmsg = DistributionStamped()
         _nodes = [p.node for p in particles]
         nodes, counts = np.unique(_nodes, return_counts=True)
@@ -251,6 +256,8 @@ class TopologicalLocalisation():
     def __publish(self, node, particles):
         particles_array = MarkerArray()
         nodes_array = MarkerArray()
+        time = rospy.get_rostime()
+        pa_i = 0
         for agent_i in range(len(self.agents)):
             # publish localisation results
             self.res_publishers[agent_i][0].publish(self.__prepare_cn_msg(node[agent_i]))
@@ -259,30 +266,23 @@ class TopologicalLocalisation():
 
             # collects particles
             for p in particles[agent_i]:
-                ptc_mkr = Marker()
-                ptc_mkr.header = self.agents_markers[agent_i][1].header
-                ptc_mkr.header.stamp = rospy.get_rostime()
-                ptc_mkr.type = self.agents_markers[agent_i][1].type
-                ptc_mkr.pose = self.agents_markers[agent_i][1].pose
+                # print(p)
+                ptc_mkr = self._marker_factory(self.agents[agent_i], particle=True)
+                ptc_mkr.header.stamp = time
                 ptc_mkr.pose.position.x = self.node_coords[p.node][0] + \
-                    self.agents_markers[agent_i][1].scale.x * np.random.randn(1, 1)
+                    (ptc_mkr.scale.x * np.random.randn())
                 ptc_mkr.pose.position.y = self.node_coords[p.node][1] + \
-                    self.agents_markers[agent_i][1].scale.y * np.random.randn(1, 1)
-                ptc_mkr.scale = self.agents_markers[agent_i][1].scale
-                ptc_mkr.color = self.agents_markers[agent_i][1].color
+                    (ptc_mkr.scale.y * np.random.randn())
+                ptc_mkr.id = pa_i
                 particles_array.markers.append(ptc_mkr)
-            
+                pa_i += 1
+
             # collect estimated nodes
-            node_mkr = Marker()
-            node_mkr.header = self.agents_markers[agent_i][0].header
-            node_mkr.header.stamp = rospy.get_rostime()
-            node_mkr.type = self.agents_markers[agent_i][0].type
-            node_mkr.pose = self.agents_markers[agent_i][0].pose
-            node_mkr.scale = self.agents_markers[agent_i][0].scale
-            node_mkr.color = self.agents_markers[agent_i][0].color
+            node_mkr = self._marker_factory(self.agents[agent_i], particle=False)
+            node_mkr.header.stamp = time
             node_mkr.pose.position.x = self.node_coords[node[agent_i]][0]
             node_mkr.pose.position.y = self.node_coords[node[agent_i]][1]
-            nodes_array.append(node_mkr)
+            nodes_array.markers.append(node_mkr)
 
         # publish viz stuff
         self.cnviz_pub.publish(nodes_array)
@@ -291,6 +291,8 @@ class TopologicalLocalisation():
     ## topic callbacks ##
     # send pose observation to particle filter
     def __pose_obs_cb(self, msg):
+        rospy.loginfo("Received pose observations for {}".format(msg.identity))
+        self.internal_lock.acquire()
         # check if it's a newly seen agent
         if msg.identity not in self.agents:
             self._initialise_new_agent(msg.identity)
@@ -313,9 +315,12 @@ class TopologicalLocalisation():
         else:
             rospy.logwarn(
                 "Received non-admissible pose observation <{}, {}, {}, {}>, discarded".format(msg.pose.pose.pose.position.x, msg.pose.pose.pose.position.y, msg.pose.pose.covariance[0], msg.pose.pose.covariance[7]))
+        self.internal_lock.release()
 
     # send likelihood observation to particle filter
     def __likelihood_obs_cb(self, msg):
+        rospy.loginfo("Received likelihood observation for {}".format(msg.identity))
+        self.internal_lock.acquire()
         # check if it's a newly seen agent
         if msg.identity not in self.agents:
             self._initialise_new_agent(msg.identity)
@@ -344,10 +349,13 @@ class TopologicalLocalisation():
         else:
             rospy.logwarn("Nodes array and values array sizes do not match {} != {}, discarding likelihood observation".format(
                 len(msg.likelihood.nodes), len(msg.likelihood.values)))
+        self.internal_lock.release()
 
     ## Services handlers ##
     # Get the pose observation and returns the localisation result
     def __update_pose_handler(self, request):
+        rospy.loginfo("Received pose request for {}".format(request.identity))
+        self.internal_lock.acquire()
         # check if it's a newly seen agent
         if request.identity not in self.agents:
             self._initialise_new_agent(request.identity)
@@ -371,10 +379,12 @@ class TopologicalLocalisation():
             resp.success = True
             resp.estimated_node = p_estimated#self.__prepare_cn_msg(p_estimated.node).data
             resp.current_prob_dist = self.__prepare_pd_msg(particles)
+            self.internal_lock.release()
             return(resp)
         else:
             rospy.logwarn(
                 "Received non-admissible pose observation <{}, {}, {}, {}>, discarded".format(request.pose.pose.pose.position.x, request.pose.pose.pose.position.y, request.pose.pose.covariance[0], request.pose.pose.covariance[7]))
+            self.internal_lock.release()
         
         # fallback negative response
         resp = UpdatePoseObservationResponse()
@@ -383,6 +393,8 @@ class TopologicalLocalisation():
 
     # get a likelihood observation and return localisation result
     def __update_likelihood_handler(self, request):
+        rospy.loginfo("Received likelihood request for {}".format(request.identity))
+        self.internal_lock.acquire()
         # check if it's a newly seen agent
         if request.identity not in self.agents:
             self._initialise_new_agent(request.identity)
@@ -411,10 +423,12 @@ class TopologicalLocalisation():
                     resp.success = True
                     resp.estimated_node = p_estimated#self.__prepare_cn_msg(p_estimated.node).data
                     resp.current_prob_dist = self.__prepare_pd_msg(particles)
+                    self.internal_lock.release()
                     return(resp)
                 else:
                     rospy.logwarn(
                         "Received non-admissible likelihood observation {}, discarded".format(request.likelihood.values))
+                    self.internal_lock.release()
 
         else:
             rospy.logwarn("Nodes array and values array sizes do not match {} != {}, discarding likelihood observation".format(
