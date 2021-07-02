@@ -223,6 +223,7 @@ class TopologicalLocalisation():
     def __prepare_pd_msg(self, particles, timestamp=None):
         # print(particles)
         pdmsg = DistributionStamped()
+        # print(particles)
         _nodes = [p.node for p in particles]
         nodes, counts = np.unique(_nodes, return_counts=True)
 
@@ -378,7 +379,8 @@ class TopologicalLocalisation():
             resp = UpdatePoseObservationResponse()
             resp.success = True
             resp.estimated_node = p_estimated#self.__prepare_cn_msg(p_estimated.node).data
-            resp.current_prob_dist = self.__prepare_pd_msg(particles)
+            for agent_i in range(len(self.agents)):
+                resp.current_prob_dist.append(self.__prepare_pd_msg(particles[agetn_i]))
             self.internal_lock.release()
             return(resp)
         else:
@@ -422,7 +424,8 @@ class TopologicalLocalisation():
                     resp = UpdateLikelihoodObservationResponse()
                     resp.success = True
                     resp.estimated_node = p_estimated#self.__prepare_cn_msg(p_estimated.node).data
-                    resp.current_prob_dist = self.__prepare_pd_msg(particles)
+                    for agent_i in range(len(self.agents)):
+                        resp.current_prob_dist.append(self.__prepare_pd_msg(particles[agent_i]))
                     self.internal_lock.release()
                     return(resp)
                 else:

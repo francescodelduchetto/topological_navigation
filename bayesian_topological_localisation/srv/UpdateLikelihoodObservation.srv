@@ -5,5 +5,5 @@ string identity
 
 bool success
 string[] estimated_node
-bayesian_topological_localisation/DistributionStamped current_prob_dist
+bayesian_topological_localisation/DistributionStamped[] current_prob_dist
 

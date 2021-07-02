@@ -144,10 +144,10 @@ class TopologicalParticleFilter():
         # sample time (seconds) as exponential sample 
         _particles_lifes = np.random.exponential(scale=1.0, size=self.n_of_ptcl)
 
-        self.particles = [
+        self.particles = np.array([
             Particle(node, vel, life, timestamp_secs)
             for node, vel, life in zip(_particles_nodes, _particles_vels, _particles_lifes)
-        ]
+        ])
         
         for idx in range(len(self.particles)):
             self.predicted_particles[idx] = self.particles[idx].__copy__()
@@ -165,10 +165,10 @@ class TopologicalParticleFilter():
         # sample time (seconds) as exponential sample
         _particles_lifes = np.random.uniform(high=1, size=self.n_of_ptcl)
 
-        self.particles = [
+        self.particles = np.array([
             Particle(node, vel, life, timestamp_secs)
             for node, vel, life in zip(_particles_nodes, _particles_vels, _particles_lifes)
-        ]
+        ])
 
         for idx in range(len(self.particles)):
             self.predicted_particles[idx] = self.particles[idx].__copy__()
@@ -476,13 +476,15 @@ class TopologicalParticleFilter():
                 particles_idxs = np.random.choice(
                     self.weighted_masks[identity_idx], len(_identity_predicted_particles), p=prob)
             else:
-                particles_idxs = self.weighted_masks[identity_idx]
+                particles_idxs = self.identity_masks[identity_idx]
             
-            for pi, idx in enumerate(particles_idxs):
-                self.particles[self.weighted_masks[identity_idx]][pi] = _identity_predicted_particles[idx].__copy__()
+            for pi, new_pi in enumerate(particles_idxs):
+                # print(self.identities[identity])
+                # print(self.particles[self.identity_masks[identity_idx]][pi])
+                self.particles[self.identity_masks[identity_idx]][pi] = self.predicted_particles[new_pi].__copy__()
 
             # add noise to the state of the new particles
-            for p in self.particles[self.weighted_masks[identity_idx]]:
+            for p in self.particles[self.identity_masks[identity_idx]]:
                 # if self.print_debug: print("clean", str(p))
                 self._add_noise(p)
                 # if self.print_debug: print("noisy", str(p))
